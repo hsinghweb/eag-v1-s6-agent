@@ -342,57 +342,45 @@ async def add_text_in_powerpoint(text: str) -> dict:
     """Add text to the first slide of PowerPoint"""
     try:
         print(f"[MCP Tool] Received text to add: {text}")
-        print(f"[MCP Tool] Text type: {type(text)}")
-        print(f"[MCP Tool] Text length: {len(text)}")
-        print(f"[MCP Tool] Text contains newlines: {'\\n' in text}")
         
         # Wait before adding text
-        time.sleep(5)
+        time.sleep(2)
         
         # Ensure PowerPoint is closed before modifying the file
         await close_powerpoint()
-        time.sleep(5)
+        time.sleep(2)
         
         # Open the existing presentation
         prs = Presentation('presentation.pptx')
         slide = prs.slides[0]
         
         # Add a text box positioned inside the rectangle
-        # Match the rectangle position from draw_rectangle
-        left = Inches(2.2)  # Slightly more than rectangle left for margin
-        top = Inches(2.5)   # Centered vertically in rectangle
-        width = Inches(4.6) # Slightly less than rectangle width for margin
-        height = Inches(2)  # Enough height for text
+        left = Inches(2.5)  # Centered horizontally in rectangle
+        top = Inches(2.8)   # Centered vertically in rectangle
+        width = Inches(4)   # Width for the text
+        height = Inches(1.4) # Height for the text
         
         textbox = slide.shapes.add_textbox(left, top, width, height)
         text_frame = textbox.text_frame
         text_frame.clear()  # Clear existing text
-        text_frame.word_wrap = True  # Enable word wrap
+        text_frame.word_wrap = True
         text_frame.vertical_anchor = 1  # Middle vertical alignment
         
-        # Split text into lines
-        lines = text.split('\n')
-        print(f"[MCP Tool] Number of lines: {len(lines)}")
-        print(f"[MCP Tool] Lines to add: {lines}")
+        # Extract and format the numerical value
+        p = text_frame.add_paragraph()
+        value_text = text
+        if "Final Result:" in text:
+            value_text = text.split("Final Result:")[-1].strip()
+        elif "\n" in text:
+            value_text = text.split("\n")[-1].strip()
+        p.text = value_text
+        p.alignment = 1  # Center align
         
-        # Add each line as a separate paragraph
-        for i, line in enumerate(lines):
-            if line.strip():  # Only add non-empty lines
-                p = text_frame.add_paragraph()
-                p.text = line.strip()
-                p.alignment = 1  # Center align the text
-                
-                # Format the text
-                run = p.runs[0]
-                if "Final Result:" in line:
-                    run.font.size = Pt(32)  # Header size
-                    run.font.bold = True
-                else:
-                    run.font.size = Pt(28)  # Value size
-                    run.font.bold = True
-                
-                run.font.color.rgb = RGBColor(0, 0, 0)  # Black text
-                p.space_after = Pt(12)  # Add spacing between lines
+        # Format the text with larger font
+        run = p.runs[0]
+        run.font.size = Pt(32)  # Adjusted size for better fit
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(0, 0, 0)  # Black text
         
         # Save and wait
         prs.save('presentation.pptx')

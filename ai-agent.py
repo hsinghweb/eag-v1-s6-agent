@@ -125,47 +125,73 @@ async def main():
                     
                     print("Created system prompt...")
                     
-                    system_prompt = f"""You are a math agent that solves problems using structured, step-by-step reasoning and visualizes the results using PowerPoint. You must reason iteratively and explicitly separate calculation from visualization steps.
+                    system_prompt = """You are a math agent that solves problems using structured, step-by-step reasoning and visualizes the results using PowerPoint. You must reason iteratively and explicitly separate calculation from visualization steps.
 
 Available tools:
 {tools_description}
 
 Your workflow must strictly follow this structured loop for each problem:
-1. Begin by identifying the necessary computations and perform **only** mathematical calculations first using FUNCTION_CALL.
-2. Once calculations are complete, proceed to PowerPoint visualization:
-   - Always begin with: POWERPOINT: open_powerpoint
-   - Draw a rectangle to highlight results using coordinates (x1=2, y1=2, x2=7, y2=5).
-   - Display the final computed value in this exact format:
-     POWERPOINT: add_text_in_powerpoint|Final Result:\n<calculated_value>
-   - End with: POWERPOINT: close_powerpoint
+1. Begin by identifying the necessary computations and perform **only** mathematical calculations first using a function call in JSON format:
+   - For ASCII values, use 'strings_to_chars_to_int'
+   - For exponential sums, use 'int_list_to_exponential_sum'
+2. Once calculations are complete, proceed to PowerPoint visualization in JSON format:
+   - Begin with PowerPoint open operation
+   - Draw a rectangle to highlight results using coordinates (x1=2, y1=2, x2=7, y2=5)
+   - Display the final computed value
+   - End with PowerPoint close operation
 
-Always output in a **strict, one-line format** matching the following schemas:
-- For function calls:  
-  FUNCTION_CALL: function_name|param1|param2|...
-- For PowerPoint operations:  
-  POWERPOINT: operation|param1|param2|...
-- For final results:  
-  FINAL_ANSWER: [<computed_value>]
+All outputs MUST be in valid JSON format following these schemas:
 
-**Do not include any explanation or extra text.** Always use exactly one line per output.
+1. For function calls:
+{
+  "type": "function_call",
+  "function": "function_name",
+  "params": {"param1": "value1", "param2": "value2"}
+}
 
-You must also follow these constraints and practices:
-- **Self-check**: If unsure of a value, re-calculate before moving to the next step.
-- **Reasoning tags**: Internally categorize your reasoning type (e.g., arithmetic, logic).
-- **Fallback behavior**: If a calculation or tool fails, return:  
-  FINAL_ANSWER: [Error: Unable to compute]
-- **Support for iterative use**: Always assume the next question might depend on prior context and computations.
+2. For PowerPoint operations:
+{
+  "type": "powerpoint",
+  "operation": "operation_name",
+  "params": {"param1": "value1", "param2": "value2"}
+}
+
+3. For final results:
+{
+  "type": "final_answer",
+  "value": "computed_value"
+}
+
+Constraints and practices:
+- **Self-check**: If unsure of a value, re-calculate before moving to the next step
+- **Reasoning tags**: Internally categorize your reasoning type (e.g., arithmetic, logic)
+- **Fallback behavior**: If a calculation or tool fails, return: {"type": "final_answer", "value": "Error: Unable to compute"}
+- **Support for iterative use**: Always assume the next question might depend on prior context and computations
 
 Accepted array formats:
 - Comma-separated: param1,param2,param3
 - Bracketed list: [param1,param2,param3]
 
 **Example outputs (use exactly these formats):**
-- FUNCTION_CALL: add|5|3
-- POWERPOINT: open_powerpoint
-- POWERPOINT: add_text_in_powerpoint|Final Result:\n7.59982224609308e+33
-- FINAL_ANSWER: [7.59982224609308e+33]
-"""
+{
+  "type": "function_call",
+  "function": "strings_to_chars_to_int",
+  "params": {"string": "HIMANSHU"}
+}
+{
+  "type": "powerpoint",
+  "operation": "open_powerpoint",
+  "params": {"dummy": null}
+}
+{
+  "type": "powerpoint",
+  "operation": "add_text_in_powerpoint",
+  "params": {"text": "Final Result:\n7.59982224609308e+33"}
+}
+{
+  "type": "final_answer",
+  "value": 7.59982224609308e+33
+}"""
 
                     query = """Find the ASCII values of characters in HIMANSHU and then return sum of exponentials of those values. 
                     Also, create a PowerPoint presentation showing the Final Answer inside a rectangle box."""
@@ -187,29 +213,63 @@ Accepted array formats:
                         prompt = f"{system_prompt}\n\nQuery: {current_query}"
                         try:
                             response = await generate_with_timeout(client, prompt)
+                            # Remove markdown code block formatting if present
                             response_text = response.text.strip()
+                            # Remove markdown formatting and clean up JSON string
+                            if '```' in response_text:
+                                response_text = response_text.split('```')[1] if len(response_text.split('```')) > 1 else response_text
+                            response_text = response_text.replace('json\n', '').strip()
+                            # Remove any leading/trailing whitespace or quotes
+                            response_text = response_text.strip('`').strip('"').strip()
                             print(f"LLM Response: {response_text}")
                             
-                            # Find the appropriate line in the response
-                            for line in response_text.split('\n'):
-                                line = line.strip()
-                                if line.startswith(("FUNCTION_CALL:", "POWERPOINT:", "FINAL_ANSWER:")):
-                                    response_text = line
-                                    break
+                            # Parse the JSON response
+                            import json
+                            try:
+                                # Try to parse the cleaned response text
+                                try:
+                                    response_json = json.loads(response_text)
+                                except json.JSONDecodeError:
+                                    # If initial parse fails, try to extract JSON from the text
+                                    import re
+                                    json_match = re.search(r'\{[^}]+\}', response_text)
+                                    if json_match:
+                                        response_text = json_match.group(0)
+                                        response_json = json.loads(response_text)
+                                    else:
+                                        raise ValueError("No valid JSON found in response")
+                                
+                                if not isinstance(response_json, dict) or 'type' not in response_json:
+                                    raise ValueError("Invalid response format")
+                                
+                                # Validate response against expected schemas
+                                valid_types = ['function_call', 'powerpoint', 'final_answer']
+                                if response_json['type'] not in valid_types:
+                                    raise ValueError(f"Invalid response type. Expected one of {valid_types}")
+                                
+                                if response_json['type'] == 'function_call':
+                                    if 'function' not in response_json or 'params' not in response_json:
+                                        raise ValueError("Invalid function_call format")
+                                elif response_json['type'] == 'powerpoint':
+                                    if 'operation' not in response_json or 'params' not in response_json:
+                                        raise ValueError("Invalid powerpoint operation format")
+                                elif response_json['type'] == 'final_answer':
+                                    if 'value' not in response_json:
+                                        raise ValueError("Invalid final_answer format")
+                            except json.JSONDecodeError as e:
+                                print(f"Failed to parse JSON response: {e}")
+                                break
                             
                         except Exception as e:
                             print(f"Failed to get LLM response: {e}")
                             break
 
-                        if response_text.startswith("FUNCTION_CALL:"):
-                            _, function_info = response_text.split(":", 1)
-                            parts = [p.strip() for p in function_info.split("|")]
-                            func_name, params = parts[0], parts[1:]
+                        if response_json['type'] == 'function_call':
+                            func_name = response_json['function']
+                            params = response_json['params']
                             
-                            print(f"[Calling Tool] Raw function info: {function_info}")
-                            print(f"[Calling Tool] Split parts: {parts}")
                             print(f"[Calling Tool] Function name: {func_name}")
-                            print(f"[Calling Tool] Raw parameters: {params}")
+                            print(f"[Calling Tool] Parameters: {params}")
                             
                             try:
                                 # Find the matching tool to get its input schema
@@ -227,10 +287,12 @@ Accepted array formats:
                                 print(f"[Calling Tool] Schema properties: {schema_properties}")
 
                                 for param_name, param_info in schema_properties.items():
-                                    if not params:  # Check if we have enough parameters
-                                        raise ValueError(f"Not enough parameters provided for {func_name}")
+                                    if param_name not in params:  # Check if parameter is provided
+                                        if param_name in tool.inputSchema.get('required', []):
+                                            raise ValueError(f"Required parameter {param_name} not provided for {func_name}")
+                                        continue
                                         
-                                    value = params.pop(0)  # Get and remove the first parameter
+                                    value = params[param_name]
                                     param_type = param_info.get('type', 'string')
                                     
                                     print(f"[Calling Tool] Converting parameter {param_name} with value {value} to type {param_type}")
@@ -241,21 +303,25 @@ Accepted array formats:
                                     elif param_type == 'number':
                                         arguments[param_name] = float(value)
                                     elif param_type == 'array':
-                                        # Handle array input - if it's already a string representation of a list
-                                        if value.startswith('[') and value.endswith(']'):
-                                            # Parse the array string properly
-                                            array_str = value.strip('[]')
-                                            if array_str:
-                                                arguments[param_name] = [int(x.strip()) for x in array_str.split(',')]
+                                        if isinstance(value, list):
+                                            arguments[param_name] = value
+                                        elif isinstance(value, str):
+                                            # Handle string representation of array
+                                            if value.startswith('[') and value.endswith(']'):
+                                                array_str = value.strip('[]')
+                                                if array_str:
+                                                    arguments[param_name] = [int(x.strip()) for x in array_str.split(',')]
+                                                else:
+                                                    arguments[param_name] = []
                                             else:
-                                                arguments[param_name] = []
+                                                # If it's a comma-separated string without brackets
+                                                if ',' in value:
+                                                    arguments[param_name] = [int(x.strip()) for x in value.split(',')]
+                                                else:
+                                                    # If it's a single value, make it a single-item list
+                                                    arguments[param_name] = [int(value)]
                                         else:
-                                            # If it's a comma-separated string without brackets
-                                            if ',' in value:
-                                                arguments[param_name] = [int(x.strip()) for x in value.split(',')]
-                                            else:
-                                                # If it's a single value, make it a single-item list
-                                                arguments[param_name] = [int(value)]
+                                            raise ValueError(f"Invalid array format for parameter {param_name}")
                                     else:
                                         arguments[param_name] = str(value)
 
@@ -302,10 +368,9 @@ Accepted array formats:
                                 iteration_response.append(f"Error in iteration {iteration + 1}: {str(e)}")
                                 break
 
-                        elif response_text.startswith("POWERPOINT:"):
-                            _, operation_info = response_text.split(":", 1)
-                            parts = [p.strip() for p in operation_info.split("|")]
-                            operation, params = parts[0], parts[1:]
+                        elif response_json['type'] == 'powerpoint':
+                            operation = response_json['operation']
+                            params = response_json['params']
                             
                             print(f"[Calling Tool] PowerPoint operation: {operation}")
                             print(f"[Calling Tool] PowerPoint parameters: {params}")
@@ -320,21 +385,13 @@ Accepted array formats:
                                         continue
                                 elif operation == "draw_rectangle":
                                     if powerpoint_opened:
-                                        # Convert parameters to integers before passing
                                         try:
-                                            x1, y1, x2, y2 = map(int, params)
                                             result = await session.call_tool(
                                                 "draw_rectangle",
-                                                arguments={
-                                                    "x1": x1,
-                                                    "y1": y1,
-                                                    "x2": x2,
-                                                    "y2": y2
-                                                }
+                                                arguments=params
                                             )
-                                        except (ValueError, TypeError) as e:
-                                            print(f"[Calling Tool] Error converting rectangle parameters: {e}")
-                                            print(f"[Calling Tool] Raw parameters: {params}")
+                                        except Exception as e:
+                                            print(f"[Calling Tool] Error with rectangle parameters: {e}")
                                             iteration_response.append(f"Error: Invalid rectangle parameters - {str(e)}")
                                             continue
                                     else:
@@ -342,36 +399,21 @@ Accepted array formats:
                                         continue
                                 elif operation == "add_text_in_powerpoint":
                                     if powerpoint_opened:
-                                        # Get the full text after the operation name
-                                        full_text = response_text.split("|", 1)[1].strip()
-                                        # Remove any extra quotes and handle newlines
-                                        full_text = full_text.replace('"', '').replace("\\n", "\n")
+                                        text = params.get('text', '')
+                                        # Handle newlines in JSON string
                                         
                                         # If this is the final result text, append the calculated value
-                                        if "Final Result:" in full_text:
+                                        if "Final Result:" in text:
                                             # Find the last calculation result from iteration_response
                                             calc_result = next((resp.split("returned")[1].strip() 
                                                 for resp in reversed(iteration_response) 
-                                                if "int_list_to_exponential_sum" in resp), None)
+                                                if "returned" in resp), None)
                                             if calc_result:
-                                                full_text = f"Final Result:\n{calc_result}"
-                                        
-                                        # Ensure proper newline handling
-                                        full_text = full_text.replace('\n\n', '\n')
-                                        print(f"[Calling Tool] Full text to add: {repr(full_text)}")  # Show raw string representation
-                                        print(f"[Calling Tool] Text length: {len(full_text)}")
-                                        print(f"[Calling Tool] Text contains newlines: {'\\n' in full_text}")
-                                        
-                                        # Split the text into lines and rejoin with proper newlines
-                                        lines = full_text.split('\n')
-                                        formatted_text = '\n'.join(line.strip() for line in lines if line.strip())
-                                        print(f"[Calling Tool] Formatted text: {repr(formatted_text)}")
+                                                text = f"Final Result:\n{calc_result}"
                                         
                                         result = await session.call_tool(
                                             "add_text_in_powerpoint",
-                                            arguments={
-                                                "text": formatted_text
-                                            }
+                                            arguments={"text": text}
                                         )
                                     else:
                                         iteration_response.append("PowerPoint must be opened first")
@@ -380,59 +422,70 @@ Accepted array formats:
                                     if powerpoint_opened:
                                         result = await session.call_tool("close_powerpoint")
                                         powerpoint_opened = False
-                                        # Add final answer here and break the loop
-                                        print("\n=== Agent Execution Complete ===")
-                                        final_answer = next(resp.split("returned")[1].strip() 
-                                            for resp in iteration_response 
-                                            if "int_list_to_exponential_sum" in resp)
-                                        print(f"Final Answer: {final_answer}")
-                                        break
                                     else:
-                                        iteration_response.append("PowerPoint is already closed")
+                                        iteration_response.append("PowerPoint is not open")
                                         continue
                                 else:
-                                    raise ValueError(f"Unknown PowerPoint operation: {operation}")
+                                    iteration_response.append(f"Unknown PowerPoint operation: {operation}")
+                                    continue
                                 
-                                print(f"[MCP Tool → LLM] PowerPoint result: {result}")
-                                iteration_response.append(f"PowerPoint operation '{operation}' completed successfully.")
+                                # Get the full result content
+                                if hasattr(result, 'content'):
+                                    # Handle multiple content items
+                                    if isinstance(result.content, list):
+                                        iteration_result = [
+                                            item.text if hasattr(item, 'text') else str(item)
+                                            for item in result.content
+                                        ]
+                                    else:
+                                        iteration_result = str(result.content)
+                                else:
+                                    iteration_result = str(result)
+                                    
+                                # Format the response based on result type
+                                if isinstance(iteration_result, list):
+                                    result_str = f"[{', '.join(iteration_result)}]"
+                                else:
+                                    result_str = str(iteration_result)
+                                
+                                iteration_response.append(
+                                    f"In the {iteration + 1} iteration you performed PowerPoint operation {operation} "
+                                    f"with {params} parameters, and the operation returned {result_str}."
+                                )
+                                last_response = iteration_result
                                 
                             except Exception as e:
-                                print(f"[MCP Tool → LLM] Error in PowerPoint operation: {str(e)}")
+                                print(f"Error in PowerPoint operation: {e}")
                                 iteration_response.append(f"Error in PowerPoint operation: {str(e)}")
                                 break
-
-                        elif response_text.startswith("FINAL_ANSWER:"):
-                            # Skip this section since we're handling final answer after close_powerpoint
-                            continue
-
+                                
+                        elif response_json['type'] == 'final_answer':
+                            value = response_json['value']
+                            iteration_response.append(f"Final answer: {value}")
+                            break
+                            
                         iteration += 1
-
-            break  # If we get here, everything worked fine
-            
-        except KeyboardInterrupt:
-            print("\nKeyboard interrupt detected, cleaning up...")
-            reset_state()
-            break
+                        
+                    if iteration >= max_iterations:
+                        print("Reached maximum iterations")
+                        break
+                        
+                    print("\nFinal Results:")
+                    for resp in iteration_response:
+                        print(resp)
+                        
+                    return
+                    
         except Exception as e:
-            print(f"Error in main execution (attempt {retry_count + 1}/{max_retries}): {e}")
+            print(f"Error in main loop: {e}")
             retry_count += 1
-            if retry_count < max_retries:
-                print(f"Retrying in 5 seconds...")
-                await asyncio.sleep(5)
-            else:
-                print("Max retries reached, exiting...")
-                raise
-        finally:
-            reset_state()  # Reset at the end of main
+            if retry_count >= max_retries:
+                print("Maximum retries reached")
+                break
+            print(f"Retrying... ({retry_count}/{max_retries})")
+            continue
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nExiting due to keyboard interrupt...")
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        import traceback
-        traceback.print_exc()
+    asyncio.run(main())
     
     
