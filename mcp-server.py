@@ -208,11 +208,15 @@ async def open_powerpoint() -> dict:
         os.startfile(filename)
         time.sleep(10)  # Increased wait time for PowerPoint to open
         
+        # Draw a rectangle for the result
+        await draw_rectangle(2, 2, 6, 5)
+        time.sleep(3)  # Wait for rectangle to be drawn
+        
         return {
             "content": [
                 TextContent(
                     type="text",
-                    text="PowerPoint opened successfully with a new presentation"
+                    text="PowerPoint opened successfully with a new presentation and rectangle"
                 )
             ]
         }
