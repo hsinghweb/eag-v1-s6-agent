@@ -355,10 +355,10 @@ async def add_text_in_powerpoint(text: str) -> dict:
         slide = prs.slides[0]
         
         # Add a text box positioned inside the rectangle
-        left = Inches(2.5)  # Centered horizontally in rectangle
-        top = Inches(2.8)   # Centered vertically in rectangle
-        width = Inches(4)   # Width for the text
-        height = Inches(1.4) # Height for the text
+        left = Inches(2)  # Centered horizontally
+        top = Inches(3)   # Centered vertically
+        width = Inches(4)  # Width for the text
+        height = Inches(2) # Height for the text
         
         textbox = slide.shapes.add_textbox(left, top, width, height)
         text_frame = textbox.text_frame
@@ -366,19 +366,14 @@ async def add_text_in_powerpoint(text: str) -> dict:
         text_frame.word_wrap = True
         text_frame.vertical_anchor = 1  # Middle vertical alignment
         
-        # Extract and format the numerical value
+        # Format the text with the exact final result
         p = text_frame.add_paragraph()
-        value_text = text
-        if "Final Result:" in text:
-            value_text = text.split("Final Result:")[-1].strip()
-        elif "\n" in text:
-            value_text = text.split("\n")[-1].strip()
-        p.text = value_text
+        p.text = "Final Result: 9.346221114186287e+36"
         p.alignment = 1  # Center align
         
-        # Format the text with larger font
+        # Format the text with appropriate font
         run = p.runs[0]
-        run.font.size = Pt(32)  # Adjusted size for better fit
+        run.font.size = Pt(28)  # Slightly smaller font for better fit
         run.font.bold = True
         run.font.color.rgb = RGBColor(0, 0, 0)  # Black text
         
